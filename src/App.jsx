@@ -53,22 +53,29 @@ function App() {
         c.code !== 'TP.DK.USD.A' && c.code !== 'TP.DK.EUR.A'
       );
       
-      // Öncelikli dövizleri sırayla çek
-      const priorityResults = [];
-      for (const currency of priorityCurrencies) {
-        const range = await getCurrencyRange(startDate, currency.code);
-        priorityResults.push({ currency, range });
-      }
+      // Tüm dövizleri sırayla işle (öncelikliler önce)
+      const allCurrencies = [...priorityCurrencies, ...otherCurrencies];
+      const currencyResults = [];
       
-      // Diğer dövizleri sırayla çek
-      const otherResults = [];
-      for (const currency of otherCurrencies) {
-        const range = await getCurrencyRange(startDate, currency.code);
-        otherResults.push({ currency, range });
+      // Her isteği sırayla at, bir önceki bitmeden bir sonrakine geçme
+      for (let i = 0; i < allCurrencies.length; i++) {
+        const currency = allCurrencies[i];
+        console.log(`[${i + 1}/${allCurrencies.length}] İstek atılıyor: ${currency.code} (${currency.name})`);
+        
+        try {
+          const range = await getCurrencyRange(startDate, currency.code);
+          currencyResults.push({ currency, range });
+          console.log(`[${i + 1}/${allCurrencies.length}] İstek tamamlandı: ${currency.code}`);
+          
+          // İstekler arasında kısa bir bekleme (TCMB rate limit için)
+          if (i < allCurrencies.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 200)); // 200ms bekle
+          }
+        } catch (error) {
+          console.error(`[${i + 1}/${allCurrencies.length}] İstek hatası: ${currency.code}`, error);
+          currencyResults.push({ currency, range: null });
+        }
       }
-      
-      // Sonuçları birleştir (öncelikliler önce)
-      const currencyResults = [...priorityResults, ...otherResults];
 
       // Sadece başarılı sonuçları hesapla
       const calculatedResults = {};

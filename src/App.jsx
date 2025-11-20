@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import './App.css';
-import { getCurrencyRange } from './services/api';
+import { getCurrencyRangeFromJSON } from './services/jsonReader';
 import { calculateCurrencyReturn } from './services/calculator';
 import InvestmentCard from './components/InvestmentCard';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -43,36 +43,19 @@ function App() {
     try {
       console.log('Hesaplama başladı. StartDate:', startDate);
       
-      // Önce öncelikli dövizleri (USD ve EUR) sırayla çek
-      const priorityCurrencies = CURRENCIES.filter(c => 
-        c.code === 'TP.DK.USD.A' || c.code === 'TP.DK.EUR.A'
-      );
-      
-      // Sonra diğer dövizleri al
-      const otherCurrencies = CURRENCIES.filter(c => 
-        c.code !== 'TP.DK.USD.A' && c.code !== 'TP.DK.EUR.A'
-      );
-      
-      // Tüm dövizleri sırayla işle (öncelikliler önce)
-      const allCurrencies = [...priorityCurrencies, ...otherCurrencies];
+      // JSON dosyalarından veri oku (artık API'ye istek atmıyoruz)
       const currencyResults = [];
       
-      // Her isteği sırayla at, bir önceki bitmeden bir sonrakine geçme
-      for (let i = 0; i < allCurrencies.length; i++) {
-        const currency = allCurrencies[i];
-        console.log(`[${i + 1}/${allCurrencies.length}] İstek atılıyor: ${currency.code} (${currency.name})`);
+      for (let i = 0; i < CURRENCIES.length; i++) {
+        const currency = CURRENCIES[i];
+        console.log(`[${i + 1}/${CURRENCIES.length}] JSON'dan okunuyor: ${currency.code} (${currency.name})`);
         
         try {
-          const range = await getCurrencyRange(startDate, currency.code);
+          const range = await getCurrencyRangeFromJSON(currency.code, startDate);
           currencyResults.push({ currency, range });
-          console.log(`[${i + 1}/${allCurrencies.length}] İstek tamamlandı: ${currency.code}`);
-          
-          // İstekler arasında kısa bir bekleme (TCMB rate limit için)
-          if (i < allCurrencies.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 200)); // 200ms bekle
-          }
+          console.log(`[${i + 1}/${CURRENCIES.length}] JSON okuma tamamlandı: ${currency.code}`, range);
         } catch (error) {
-          console.error(`[${i + 1}/${allCurrencies.length}] İstek hatası: ${currency.code}`, error);
+          console.error(`[${i + 1}/${CURRENCIES.length}] JSON okuma hatası: ${currency.code}`, error);
           currencyResults.push({ currency, range: null });
         }
       }
@@ -202,6 +185,7 @@ function App() {
                 onChange={(date) => setStartDate(date)}
                 dateFormat="dd/MM/yyyy"
                 maxDate={new Date()}
+                minDate={new Date('1990-01-01')}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 wrapperClassName="w-full"
               />

@@ -1,17 +1,25 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from evds import evdsAPI
+from dotenv import load_dotenv
 import os
 import sys
 
 # EVDS Paketini kullanmak için
 # pip install flask flask-cors evds
 
+load_dotenv()
+
 app = Flask(__name__)
 CORS(app)  # Tüm originlere izin ver (Development için)
 
 # API Key
-API_KEY = os.getenv("EVDS_API_KEY", "LHfpB2AyPN")
+API_KEY = os.getenv("EVDS_API_KEY")
+if not API_KEY:
+    raise RuntimeError(
+        "EVDS_API_KEY ortama yüklenmedi. Lütfen proje köküne .env dosyası oluşturup "
+        "EVDS_API_KEY=your_key formatında değer girin."
+    )
 
 @app.route('/api/tcmb', methods=['GET'])
 def get_tcmb_data():

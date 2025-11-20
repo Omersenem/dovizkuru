@@ -3,6 +3,12 @@
  * src/jsons klasöründeki JSON dosyalarını kullanır
  */
 
+// 2005-01-01'de 6 sıfır atıldı (redenomination)
+// Bu tarihten önceki değerler 1.000.000'a bölünmeli
+const REDENOMINATION_DATE = new Date('2005-01-01');
+REDENOMINATION_DATE.setHours(0, 0, 0, 0); // Tarih karşılaştırması için saatleri sıfırla
+const REDENOMINATION_FACTOR = 1_000_000;
+
 /**
  * Tarih formatını TCMB formatına çevirir (DD-MM-YYYY)
  */
@@ -19,7 +25,57 @@ const formatDateForTCMB = (date) => {
  */
 const parseTCMBDate = (dateString) => {
   const [day, month, year] = dateString.split('-');
-  return new Date(year, month - 1, day);
+  const date = new Date(year, month - 1, day);
+  date.setHours(0, 0, 0, 0); // Tarih karşılaştırması için saatleri sıfırla
+  return date;
+};
+
+/**
+ * Fiyatı 2005 para birimi dönüşümüne göre ayarlar
+ * 2005-01-01'den önceki tarihler için değeri 1.000.000'a böler
+ * 2005-01-01 ve sonrası için değeri olduğu gibi bırakır
+ */
+const adjustPriceForRedenomination = (priceNum, dateObj) => {
+  if (!(dateObj instanceof Date) || isNaN(dateObj)) {
+    // Tarih yoksa veya geçersizse, dönüşüm yapma (güvenli tarafta kal)
+    return priceNum;
+  }
+  
+  // Tarih karşılaştırması için saatleri sıfırla
+  const normalizedDate = new Date(dateObj);
+  normalizedDate.setHours(0, 0, 0, 0);
+  
+  // 2005-01-01'den önceki tarihler için 1.000.000'a böl
+  if (normalizedDate < REDENOMINATION_DATE) {
+    return priceNum / REDENOMINATION_FACTOR;
+  }
+  
+  // 2005-01-01 ve sonrası için olduğu gibi bırak
+  return priceNum;
+};
+
+const extractPrice = (item, seriesCode) => {
+  const rawPrice = item[seriesCode];
+  if (rawPrice === null || rawPrice === undefined) {
+    return null;
+  }
+
+  const priceNum = parseFloat(rawPrice);
+  if (isNaN(priceNum)) {
+    return null;
+  }
+
+  const tarih = item.Tarih || item.tarih;
+  let dateObj = null;
+  if (tarih) {
+    try {
+      dateObj = parseTCMBDate(tarih);
+    } catch (error) {
+      // Geçersiz tarih formatı, dönüşüm yapılmaz
+    }
+  }
+
+  return adjustPriceForRedenomination(priceNum, dateObj);
 };
 
 /**
@@ -128,9 +184,9 @@ const findPriceForDate = (items, seriesCode, targetDate) => {
   
   // Tam eşleşme varsa ve değeri null değilse döndür
   if (exactMatch) {
-    const price = exactMatch[seriesCode];
-    if (price !== null && price !== undefined && !isNaN(parseFloat(price))) {
-      return parseFloat(price);
+    const price = extractPrice(exactMatch, seriesCode);
+    if (price !== null && price !== undefined && !isNaN(price)) {
+      return price;
     }
   }
   
@@ -140,10 +196,10 @@ const findPriceForDate = (items, seriesCode, targetDate) => {
   
   for (const item of items) {
     const tarih = item.Tarih || item.tarih;
-    const price = item[seriesCode];
+    const price = extractPrice(item, seriesCode);
     
     // Geçerli bir fiyat olmalı
-    if (price === null || price === undefined || isNaN(parseFloat(price))) {
+    if (price === null || price === undefined || isNaN(price)) {
       continue;
     }
     
@@ -163,7 +219,7 @@ const findPriceForDate = (items, seriesCode, targetDate) => {
   }
   
   if (closestItem) {
-    return parseFloat(closestItem[seriesCode]);
+    return extractPrice(closestItem, seriesCode);
   }
   
   return null;
@@ -201,10 +257,10 @@ export const getCurrencyRangeFromJSON = async (seriesCode, startDate) => {
     // En son geçerli değeri bul
     for (let i = items.length - 1; i >= 0; i--) {
       const item = items[i];
-      const price = item[seriesCode];
+      const price = extractPrice(item, seriesCode);
       
-      if (price !== null && price !== undefined && !isNaN(parseFloat(price))) {
-        lastPrice = parseFloat(price);
+      if (price !== null && price !== undefined && !isNaN(price)) {
+        lastPrice = price;
         lastItem = item;
         break;
       }

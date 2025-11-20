@@ -1,7 +1,9 @@
 import axios from 'axios';
 
-// Backend API Base URL (Vite proxy üzerinden)
-const BACKEND_API_URL = '/api/tcmb';
+// Backend API Base URL
+// Development: Vite proxy üzerinden (/api/tcmb)
+// Production: Environment variable'dan veya varsayılan olarak Render URL'i
+const BACKEND_API_URL = import.meta.env.VITE_API_URL || '/api/tcmb';
 
 /**
  * Tarih formatını API formatına çevirir (YYYY-MM-DD)

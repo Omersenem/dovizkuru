@@ -11,7 +11,15 @@ import sys
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)  # Tüm originlere izin ver (Development için)
+
+# CORS ayarları: Production'da belirli originlere izin ver
+allowed_origins = os.getenv('ALLOWED_ORIGINS', '*').split(',')
+if allowed_origins == ['*']:
+    # Development: Tüm originlere izin ver
+    CORS(app)
+else:
+    # Production: Belirli originlere izin ver
+    CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
 
 # API Key
 API_KEY = os.getenv("EVDS_API_KEY")

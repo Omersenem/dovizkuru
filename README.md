@@ -47,19 +47,68 @@ npm run dev
 ```
 Vite, `/api/tcmb` çağrılarını `vite.config.js` içindeki proxy sayesinde `http://localhost:3001` adresine yönlendirir.
 
-## Üretim Derlemesi ve GitHub Pages
-Projede GitHub Pages için “Docs” seçeneği kullanılıyor. `vite.config.js` içerisinde:
+## Production Deployment
+
+### Backend Deployment (Render)
+
+GitHub Pages sadece statik dosyaları barındırabilir, Python backend çalıştıramaz. Bu yüzden backend'i ayrı bir servise deploy etmeniz gerekir.
+
+**Render.com'da Backend Deploy:**
+
+1. [Render.com](https://render.com)'a kaydolun ve GitHub repo'nuzu bağlayın
+2. Yeni bir "Web Service" oluşturun
+3. Ayarlar:
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `gunicorn api:app`
+   - **Environment Variables**:
+     - `EVDS_API_KEY`: TCMB EVDS API anahtarınız
+     - `ALLOWED_ORIGINS`: `https://omersenem.github.io` (GitHub Pages URL'iniz)
+   - **Python Version**: 3.11.9 (veya uyumlu bir versiyon)
+4. Deploy butonuna tıklayın
+5. Backend URL'inizi not edin: `https://your-app-name.onrender.com`
+
+**Backend URL'ini Frontend'de Kullanma:**
+
+Frontend build'inde backend URL'ini kullanmak için:
+
+```bash
+# Production build sırasında environment variable'ı set edin
+VITE_API_URL=https://your-app-name.onrender.com/api/tcmb npm run build
+```
+
+Veya `.env.production` dosyası oluşturun (`.gitignore`'da olmalı):
+```
+VITE_API_URL=https://your-app-name.onrender.com/api/tcmb
+```
+
+Sonra build yapın:
+```bash
+npm run build
+```
+
+### Frontend Deployment (GitHub Pages)
+
+Projede GitHub Pages için "Docs" seçeneği kullanılıyor. `vite.config.js` içerisinde:
 - `build.outDir = 'docs'` → dağıtım dosyalarını `docs/` klasörüne üretir.
 - `base = '/dovizkuru/'` → GitHub Pages alt yolunda asset yollarını düzeltir.
 
-Yeni bir sürüm yayınlamak için:
+**Deployment Adımları:**
+
+1. Backend'i Render'a deploy edin (yukarıdaki adımlar)
+2. Backend URL'ini not edin
+3. Production build yapın (backend URL ile):
 ```bash
-npm run build   # docs/ klasörünü günceller
+VITE_API_URL=https://your-app-name.onrender.com/api/tcmb npm run build
+```
+4. Build'i GitHub'a push edin:
+```bash
 git add docs
-git commit -m "chore: publish new build"
+git commit -m "chore: publish new build with backend URL"
 git push origin main
 ```
-GitHub Pages workflow’u `docs/` klasörünü kaynak olarak kullanır, bu sayede Jekyll “docs klasörü yok” hatası ortadan kalkar.
+5. GitHub repo settings'den Pages'i aktif edin ve `docs/` klasörünü seçin
+
+**Not:** Render ücretsiz planında uygulama 15 dakika kullanılmazsa uyku moduna geçer. İlk istek biraz yavaş olabilir.
 
 ## Yardımcı Komutlar
 - `npm run lint` → ESLint kontrolleri

@@ -43,15 +43,32 @@ function App() {
     try {
       console.log('Hesaplama başladı. StartDate:', startDate);
       
-      // Tüm dövizler için Promise.all ile paralel istek at
-      const currencyPromises = CURRENCIES.map(currency => 
-        getCurrencyRange(startDate, currency.code).then(range => ({
-          currency,
-          range
-        }))
+      // Önce öncelikli dövizleri (USD ve EUR) sırayla çek
+      const priorityCurrencies = CURRENCIES.filter(c => 
+        c.code === 'TP.DK.USD.A' || c.code === 'TP.DK.EUR.A'
       );
       
-      const currencyResults = await Promise.all(currencyPromises);
+      // Sonra diğer dövizleri al
+      const otherCurrencies = CURRENCIES.filter(c => 
+        c.code !== 'TP.DK.USD.A' && c.code !== 'TP.DK.EUR.A'
+      );
+      
+      // Öncelikli dövizleri sırayla çek
+      const priorityResults = [];
+      for (const currency of priorityCurrencies) {
+        const range = await getCurrencyRange(startDate, currency.code);
+        priorityResults.push({ currency, range });
+      }
+      
+      // Diğer dövizleri sırayla çek
+      const otherResults = [];
+      for (const currency of otherCurrencies) {
+        const range = await getCurrencyRange(startDate, currency.code);
+        otherResults.push({ currency, range });
+      }
+      
+      // Sonuçları birleştir (öncelikliler önce)
+      const currencyResults = [...priorityResults, ...otherResults];
 
       // Sadece başarılı sonuçları hesapla
       const calculatedResults = {};

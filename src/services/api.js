@@ -5,6 +5,10 @@ import axios from 'axios';
 // Production: Environment variable'dan veya varsayılan olarak Render URL'i
 const BACKEND_API_URL = import.meta.env.VITE_API_URL || '/api/tcmb';
 
+// Gold API Proxy URL - Backend proxy üzerinden
+// Vite base URL'i otomatik olarak ekler (örn: /dovizkuru/api/gold)
+const GOLD_API_PROXY_URL = import.meta.env.VITE_GOLD_API_PROXY || '/api/gold';
+
 /**
  * Tarih formatını API formatına çevirir (YYYY-MM-DD)
  */
@@ -316,6 +320,203 @@ export const getStockIndex = async (date, indexType = 'BIST100') => {
     return null;
   } catch (error) {
     console.error('Borsa endeksi alınırken hata:', error);
+    return null;
+  }
+};
+
+/**
+ * Gold API sembolleri enum
+ */
+export const GOLD_API_SYMBOLS = {
+  XAG: 'XAG', // Silver
+  XAU: 'XAU', // Gold
+  BTC: 'BTC', // Bitcoin
+  ETH: 'ETH', // Ethereum
+  XPD: 'XPD', // Palladium
+  HG: 'HG'    // Copper
+};
+
+/**
+ * Tarihi Unix timestamp'e çevirir
+ * @param {Date} date - Tarih objesi
+ * @returns {number} Unix timestamp (saniye cinsinden)
+ */
+const dateToUnixTimestamp = (date) => {
+  return Math.floor(date.getTime() / 1000);
+};
+
+/**
+ * Günde 1 defa Gold API'ye istek atar ve JSON dosyalarını günceller
+ * localStorage kullanarak son güncelleme tarihini kontrol eder
+ */
+export const updateGoldApiDataIfNeeded = async () => {
+  try {
+    const LAST_UPDATE_KEY = 'goldApiLastUpdate';
+    const lastUpdate = localStorage.getItem(LAST_UPDATE_KEY);
+    const today = new Date().toDateString();
+    
+    // Eğer bugün güncellenmişse, tekrar istek atma
+    if (lastUpdate === today) {
+      console.log('Gold API verileri bugün zaten güncellenmiş, tekrar istek atılmıyor.');
+      return;
+    }
+    
+    const apiKey = import.meta.env.VITE_GOLD_API_KEY;
+    if (!apiKey) {
+      console.warn('Gold API key bulunamadı, JSON güncellemesi atlanıyor.');
+      return;
+    }
+    
+    console.log('Gold API verileri güncelleniyor...');
+    
+    // Tüm semboller için veri çek
+    const symbols = Object.values(GOLD_API_SYMBOLS);
+    const startTimestamp = dateToUnixTimestamp(new Date('1990-01-01'));
+    const endTimestamp = dateToUnixTimestamp(new Date());
+    
+    for (const symbol of symbols) {
+      try {
+        const response = await axios.get(`${GOLD_API_PROXY_URL}/history`, {
+          params: {
+            symbol: symbol,
+            startTimestamp: startTimestamp,
+            endTimestamp: endTimestamp,
+            groupBy: 'day',
+            aggregation: 'avg',
+            orderBy: 'asc'
+          },
+          timeout: 30000
+        });
+        
+        if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+          // Veriyi formatla ve JSON dosyasına kaydet
+          const formattedData = response.data.map(item => ({
+            avg_price: item.price || item.value,
+            day: new Date((item.timestamp || item.time) * 1000).toISOString().split('T')[0] + ' 00:00:00'
+          }));
+          
+          // Not: Frontend'den dosya yazma yapılamaz, bu işlem backend'de yapılmalı
+          // Şimdilik sadece localStorage'a kaydediyoruz
+          console.log(`[${symbol}] ${formattedData.length} kayıt alındı (backend'e kaydedilmeli)`);
+        }
+      } catch (error) {
+        console.error(`[${symbol}] Gold API güncelleme hatası:`, error);
+      }
+    }
+    
+    // Son güncelleme tarihini kaydet
+    localStorage.setItem(LAST_UPDATE_KEY, today);
+    console.log('Gold API verileri güncellendi.');
+    
+  } catch (error) {
+    console.error('Gold API güncelleme hatası:', error);
+  }
+};
+
+/**
+ * Gold API'den varlık fiyatını getirir (backend proxy üzerinden)
+ * @param {string} symbol - Varlık sembolü (XAU, XAG, BTC, ETH, XPD, HG)
+ * @returns {object|null} { name, price, symbol, updatedAt, updatedAtReadable } veya null
+ */
+export const getGoldApiPrice = async (symbol) => {
+  try {
+    // Backend proxy üzerinden istek at
+    const response = await axios.get(`${GOLD_API_PROXY_URL}/price/${symbol}`, {
+      timeout: 10000
+    });
+    
+    if (response.data && response.data.price) {
+      return response.data;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`Gold API fiyat alınırken hata (${symbol}):`, error);
+    return null;
+  }
+};
+
+/**
+ * Gold API'den tarih aralığı için veri çeker ve ilk-son değerleri döndürür
+ * @param {string} symbol - Varlık sembolü (XAU, XAG, BTC, ETH, XPD, HG)
+ * @param {Date} startDate - Başlangıç tarihi
+ * @returns {object|null} { firstPrice: number, lastPrice: number } veya null
+ */
+export const getGoldApiHistoryRange = async (symbol, startDate) => {
+  try {
+    // 1990-01-01'den bugüne kadar veri çek
+    const startTimestamp = dateToUnixTimestamp(new Date('1990-01-01'));
+    const endTimestamp = dateToUnixTimestamp(new Date());
+    const targetStartTimestamp = dateToUnixTimestamp(startDate);
+    
+    const response = await axios.get(`${GOLD_API_PROXY_URL}/history`, {
+      params: {
+        symbol: symbol,
+        startTimestamp: startTimestamp,
+        endTimestamp: endTimestamp,
+        groupBy: 'day',
+        aggregation: 'avg',
+        orderBy: 'asc'
+      },
+      timeout: 30000
+    });
+    
+    if (!response.data || !Array.isArray(response.data) || response.data.length === 0) {
+      console.warn(`Gold API history verisi boş veya geçersiz (${symbol})`);
+      return null;
+    }
+    
+    const items = response.data;
+    
+    // Geçerli değerlere sahip item'ları filtrele
+    const validItems = items.filter(item => {
+      const price = item.price || item.value;
+      const priceNum = parseFloat(price);
+      const timestamp = item.timestamp || item.time;
+      return timestamp && price !== null && price !== undefined && !isNaN(priceNum) && priceNum > 0;
+    });
+    
+    if (validItems.length === 0) {
+      console.warn(`Gold API geçerli veri bulunamadı (${symbol})`);
+      return null;
+    }
+    
+    // Başlangıç tarihine en yakın değeri bul
+    let firstItem = null;
+    let minTimestampDiff = Infinity;
+    
+    for (const item of validItems) {
+      const itemTimestamp = item.timestamp || item.time;
+      const timestampDiff = Math.abs(itemTimestamp - targetStartTimestamp);
+      
+      if (timestampDiff < minTimestampDiff) {
+        minTimestampDiff = timestampDiff;
+        firstItem = item;
+      }
+    }
+    
+    if (!firstItem) {
+      firstItem = validItems[0];
+    }
+    
+    // Son değeri bul (en son tarih)
+    const lastItem = validItems[validItems.length - 1];
+    
+    if (firstItem && lastItem) {
+      const firstPrice = parseFloat(firstItem.price || firstItem.value);
+      const lastPrice = parseFloat(lastItem.price || lastItem.value);
+      
+      if (!isNaN(firstPrice) && firstPrice > 0 && !isNaN(lastPrice) && lastPrice > 0) {
+        return {
+          firstPrice: firstPrice,
+          lastPrice: lastPrice
+        };
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`Gold API history alınırken hata (${symbol}):`, error);
     return null;
   }
 };

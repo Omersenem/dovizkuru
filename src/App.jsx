@@ -6,6 +6,8 @@ import { getCurrencyRangeFromJSON } from './services/jsonReader';
 import { calculateCurrencyReturn } from './services/calculator';
 import InvestmentCard from './components/InvestmentCard';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { getGoldApiRangeFromJSON } from './services/goldApiReader';
+import { GOLD_API_SYMBOLS, updateGoldApiDataIfNeeded } from './services/api';
 
 // Tüm dövizlerin tanımları
 const CURRENCIES = [
@@ -30,6 +32,16 @@ const CURRENCIES = [
   { code: 'TP.DK.QAR.A', name: 'KATAR RİYALİ', icon: '🇶🇦', color: 'border-purple-400' },
 ];
 
+// Gold API varlıkları
+const GOLD_API_ASSETS = [
+  { code: 'XAU', name: 'Altın', icon: '🥇', color: 'border-yellow-500', symbol: GOLD_API_SYMBOLS.XAU },
+  { code: 'XAG', name: 'Gümüş', icon: '🥈', color: 'border-gray-400', symbol: GOLD_API_SYMBOLS.XAG },
+  { code: 'BTC', name: 'Bitcoin', icon: '₿', color: 'border-orange-500', symbol: GOLD_API_SYMBOLS.BTC },
+  { code: 'ETH', name: 'Ethereum', icon: 'Ξ', color: 'border-blue-400', symbol: GOLD_API_SYMBOLS.ETH },
+  { code: 'XPD', name: 'Paladyum', icon: '⚪', color: 'border-gray-500', symbol: GOLD_API_SYMBOLS.XPD },
+  { code: 'HG', name: 'Bakır', icon: '🔶', color: 'border-orange-600', symbol: GOLD_API_SYMBOLS.HG },
+];
+
 function App() {
   const [startDate, setStartDate] = useState(new Date(new Date().setFullYear(new Date().getFullYear() - 1)));
   const [amount, setAmount] = useState(10000);
@@ -37,11 +49,15 @@ function App() {
   const [results, setResults] = useState(null);
   const [chartData, setChartData] = useState([]);
   const [selectedCurrencies, setSelectedCurrencies] = useState(new Set(['TP.DK.USD.A', 'TP.DK.EUR.A'])); // Varsayılan seçili
+  const [selectedGoldAssets, setSelectedGoldAssets] = useState(new Set(['XAU', 'BTC'])); // Varsayılan seçili
 
   const calculateReturns = async () => {
     setLoading(true);
     try {
       console.log('Hesaplama başladı. StartDate:', startDate);
+      
+      // Gold API verilerini günde 1 defa güncelle (eğer gerekiyorsa)
+      await updateGoldApiDataIfNeeded();
       
       // JSON dosyalarından veri oku (artık API'ye istek atmıyoruz)
       const currencyResults = [];
@@ -91,15 +107,57 @@ function App() {
 
       console.log('Hesaplanan sonuçlar:', calculatedResults);
 
+      // Gold API varlıkları için JSON'dan veri oku
+      console.log('Gold API varlıkları için JSON\'dan veri okunuyor...');
+      const goldApiResults = {};
+      
+      // USD kuru aralığını bir kez çek (tüm varlıklar için kullanılacak)
+      const usdRange = await getCurrencyRangeFromJSON('TP.DK.USD.A', startDate);
+      
+      for (const asset of GOLD_API_ASSETS) {
+        try {
+          console.log(`Gold API JSON'dan okunuyor: ${asset.symbol} (${asset.name})`);
+          const range = await getGoldApiRangeFromJSON(asset.symbol, startDate, usdRange);
+          
+          if (range && range.firstPrice !== null && range.firstPrice !== undefined && 
+              range.lastPrice !== null && range.lastPrice !== undefined) {
+            // Fiyatlar zaten TL cinsinden (getGoldApiRangeFromJSON içinde USD kuru ile çarpıldı)
+            const startPriceInTRY = parseFloat(range.firstPrice);
+            const endPriceInTRY = parseFloat(range.lastPrice);
+            
+            if (!isNaN(startPriceInTRY) && startPriceInTRY > 0 && 
+                !isNaN(endPriceInTRY) && endPriceInTRY > 0) {
+              const result = calculateCurrencyReturn(amount, startPriceInTRY, endPriceInTRY);
+              
+              if (!isNaN(result.profit) && !isNaN(result.profitPercentage) && 
+                  !isNaN(result.endValue) && !isNaN(result.startValue)) {
+                goldApiResults[asset.code] = result;
+                chartDataArray.push({ 
+                  name: asset.name, 
+                  value: result.profitPercentage, 
+                  profit: result.profit,
+                  code: asset.code
+                });
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`Gold API JSON okuma hatası (${asset.symbol}):`, error);
+        }
+      }
+
+      // Tüm sonuçları birleştir
+      const allResults = { ...calculatedResults, ...goldApiResults };
+
       // Eğer hiç sonuç yoksa uyarı göster
-      if (Object.keys(calculatedResults).length === 0) {
+      if (Object.keys(allResults).length === 0) {
         alert('Veri alınamadı. Lütfen daha sonra tekrar deneyin.');
         setResults(null);
         setChartData([]);
         return;
       }
 
-      setResults(calculatedResults);
+      setResults(allResults);
       setChartData(chartDataArray);
     } catch (error) {
       console.error('Hesaplama hatası:', error);
@@ -125,27 +183,52 @@ function App() {
     setSelectedCurrencies(newSelected);
   };
 
+  const toggleGoldAsset = (code) => {
+    const newSelected = new Set(selectedGoldAssets);
+    if (newSelected.has(code)) {
+      newSelected.delete(code);
+    } else {
+      newSelected.add(code);
+    }
+    setSelectedGoldAssets(newSelected);
+  };
+
   // En çok kazandıran dövizi bul
   const bestCurrency = useMemo(() => {
     if (!results || !chartData.length) return null;
     
-    const allResults = chartData
+    const currencyResults = chartData
       .filter(item => selectedCurrencies.has(item.code))
       .map(item => {
         const currency = CURRENCIES.find(c => c.code === item.code);
-        return {
+        return currency ? {
           ...item,
           ...results[item.code],
           currency
-        };
-      });
+        } : null;
+      })
+      .filter(item => item !== null);
+    
+    const goldResults = chartData
+      .filter(item => selectedGoldAssets.has(item.code))
+      .map(item => {
+        const asset = GOLD_API_ASSETS.find(a => a.code === item.code);
+        return asset ? {
+          ...item,
+          ...results[item.code],
+          currency: asset
+        } : null;
+      })
+      .filter(item => item !== null);
+    
+    const allResults = [...currencyResults, ...goldResults];
     
     if (allResults.length === 0) return null;
     
     return allResults.reduce((prev, current) => 
       (prev.profitPercentage > current.profitPercentage) ? prev : current
     );
-  }, [results, chartData, selectedCurrencies]);
+  }, [results, chartData, selectedCurrencies, selectedGoldAssets]);
 
   // Filtrelenmiş sonuçlar
   const filteredResults = useMemo(() => {
@@ -157,8 +240,13 @@ function App() {
         filtered[code] = results[code];
       }
     });
+    Array.from(selectedGoldAssets).forEach(code => {
+      if (results[code]) {
+        filtered[code] = results[code];
+      }
+    });
     return filtered;
-  }, [results, selectedCurrencies]);
+  }, [results, selectedCurrencies, selectedGoldAssets]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
@@ -230,7 +318,7 @@ function App() {
         {results && (
           <div className="space-y-8">
             {/* Multi-Select Filter */}
-            <div className="bg-white rounded-2xl shadow-xl p-6">
+            <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
               <h2 className="text-xl font-bold text-gray-800 mb-4">📊 Döviz Filtreleme</h2>
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
                 {CURRENCIES.map(currency => {
@@ -255,6 +343,39 @@ function App() {
                       />
                       <span className="text-sm font-medium text-gray-700">
                         {currency.icon} {currency.name.split(' ')[0]}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Gold API Assets Filter */}
+            <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
+              <h2 className="text-xl font-bold text-gray-800 mb-4">💎 Değerli Madenler & Kripto Filtreleme</h2>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                {GOLD_API_ASSETS.map(asset => {
+                  const isSelected = selectedGoldAssets.has(asset.code);
+                  const hasData = results[asset.code] !== undefined;
+                  
+                  return (
+                    <label
+                      key={asset.code}
+                      className={`flex items-center space-x-2 p-3 rounded-lg border-2 cursor-pointer transition-all ${
+                        isSelected
+                          ? 'border-indigo-500 bg-indigo-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      } ${!hasData ? 'opacity-50' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleGoldAsset(asset.code)}
+                        disabled={!hasData}
+                        className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700">
+                        {asset.icon} {asset.name}
                       </span>
                     </label>
                   );
@@ -292,28 +413,31 @@ function App() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {Object.entries(filteredResults).map(([code, result]) => {
                 const currency = CURRENCIES.find(c => c.code === code);
-                if (!currency) return null;
+                const goldAsset = GOLD_API_ASSETS.find(a => a.code === code);
+                const asset = currency || goldAsset;
+                
+                if (!asset) return null;
                 
                 return (
                   <InvestmentCard
                     key={code}
-                    title={currency.name}
-                    icon={currency.icon}
+                    title={asset.name}
+                    icon={asset.icon}
                     result={result}
-                    color={currency.color}
+                    color={asset.color}
                   />
                 );
               })}
             </div>
 
             {/* Chart Section */}
-            {chartData.filter(item => selectedCurrencies.has(item.code)).length > 0 && (
+            {chartData.filter(item => selectedCurrencies.has(item.code) || selectedGoldAssets.has(item.code)).length > 0 && (
               <div className="bg-white rounded-2xl shadow-xl p-8">
                 <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">
                   Kar/Zarar Karşılaştırması
                 </h2>
                 <ResponsiveContainer width="100%" height={400}>
-                  <LineChart data={chartData.filter(item => selectedCurrencies.has(item.code))}>
+                  <LineChart data={chartData.filter(item => selectedCurrencies.has(item.code) || selectedGoldAssets.has(item.code))}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
                     <YAxis label={{ value: 'Kar/Zarar (%)', angle: -90, position: 'insideLeft' }} />

@@ -14,6 +14,10 @@ export default defineConfig({
       '/api/tcmb': {
         target: 'http://localhost:3001',
         changeOrigin: true
+      },
+      '/api/gold': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
       }
     }
   }

@@ -1,9 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from evds import evdsAPI
 from dotenv import load_dotenv
 import os
 import sys
+import requests
 
 # EVDS Paketini kullanmak için
 # pip install flask flask-cors evds
@@ -21,13 +22,19 @@ else:
     # Production: Belirli originlere izin ver
     CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
 
-# API Key
+# API Keys
 API_KEY = os.getenv("EVDS_API_KEY")
 if not API_KEY:
     raise RuntimeError(
         "EVDS_API_KEY ortama yüklenmedi. Lütfen proje köküne .env dosyası oluşturup "
         "EVDS_API_KEY=your_key formatında değer girin."
     )
+
+GOLD_API_KEY = os.getenv("GOLD_API_KEY")
+if not GOLD_API_KEY:
+    print("Uyarı: GOLD_API_KEY ortama yüklenmedi. Gold API özellikleri çalışmayabilir.")
+
+GOLD_API_BASE_URL = "https://api.gold-api.com"
 
 @app.route('/api/tcmb', methods=['GET'])
 def get_tcmb_data():
@@ -91,6 +98,43 @@ def get_tcmb_data():
             except Exception:
                 pass
         return jsonify({'error': str(e), 'detail': detail}), 500
+
+def proxy_gold_api(path, params=None, timeout=30):
+    if not GOLD_API_KEY:
+        return jsonify({'error': 'GOLD_API_KEY tanımlı değil. Lütfen backend ortam değişkenini ayarlayın.'}), 500
+    
+    url = f"{GOLD_API_BASE_URL}{path}"
+    try:
+        response = requests.get(
+            url,
+            headers={'x-api-key': GOLD_API_KEY},
+            params=params,
+            timeout=timeout
+        )
+        return Response(
+            response=response.content,
+            status=response.status_code,
+            content_type=response.headers.get('Content-Type', 'application/json')
+        )
+    except requests.exceptions.RequestException as e:
+        print(f"Gold API isteği başarısız ({path}): {str(e)}")
+        return jsonify({'error': 'Gold API isteği başarısız', 'detail': str(e)}), 502
+
+
+@app.route('/api/gold/price/<symbol>', methods=['GET'])
+def gold_price_proxy(symbol):
+    return proxy_gold_api(f"/price/{symbol}", timeout=10)
+
+
+@app.route('/api/gold/history', methods=['GET'])
+def gold_history_proxy():
+    params = {}
+    for key in ['symbol', 'startTimestamp', 'endTimestamp', 'groupBy', 'aggregation', 'orderBy']:
+        value = request.args.get(key)
+        if value is not None:
+            params[key] = value
+    
+    return proxy_gold_api("/history", params=params, timeout=30)
 
 @app.route('/health', methods=['GET'])
 def health():
